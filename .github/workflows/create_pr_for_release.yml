@@ -1,0 +1,54 @@
+name: Check for new validator release
+
+# Checks npm for the latest `ibm-openapi-validator` release. When it is newer
+# than the version pinned in the Dockerfile, a pull request is opened to bump
+# it. Merge that PR and publish a matching GitHub release to build and push the
+# image (see docker-image.yml).
+
+on:
+  schedule:
+    # Daily at 06:00 UTC
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  check-release:
+    name: Check release, open PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+
+      - name: Get latest ibm-openapi-validator version
+        id: latest
+        run: |
+          version=$(curl -sf https://registry.npmjs.org/ibm-openapi-validator/latest | jq -r .version)
+          if [ -z "$version" ] || [ "$version" = "null" ]; then
+            echo "Could not resolve latest version" >&2
+            exit 1
+          fi
+          echo "Latest version: $version"
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+
+      - name: Update Dockerfile
+        id: update
+        run: ./update.sh "${{ steps.latest.outputs.version }}"
+
+      - name: Create pull request
+        if: steps.update.outputs.make_pr == 'yes'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "Bump to ibm-openapi-validator@${{ steps.latest.outputs.version }}"
+          title: "Bump to ibm-openapi-validator@${{ steps.latest.outputs.version }}"
+          body: |
+            Automated bump to [`ibm-openapi-validator@${{ steps.latest.outputs.version }}`](https://github.com/IBM/openapi-validator/releases/tag/ibm-openapi-validator%40${{ steps.latest.outputs.version }}).
+
+            After merging, publish a GitHub release tagged `${{ steps.latest.outputs.version }}` to build and push the image.
+          branch: "bump/ibm-openapi-validator-${{ steps.latest.outputs.version }}"
+          base: master
+          delete-branch: true
